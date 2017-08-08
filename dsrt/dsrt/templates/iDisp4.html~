@@ -1,0 +1,248 @@
+{% extends 'base.html' %}
+
+{% block title %}Search Summary{% endblock %}
+
+{% block head %} 
+<link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/redmond/jquery-ui.css">
+<script src="http://code.jquery.com/ui/1.10.3/jquery-ui.js"></script>
+<style type="text/css">
+#progressbar {width: 512px;}
+#myCanvas {display: none;}
+.roiListContainer {width: 100px;}
+table {table-layout:fixed;} 
+.ui-progressbar { position: relative;}
+.progress-label { position: absolute; left: 35%; top: 4px; font-weight: bold; text-shadow: 1px 1px 0 #fff;}
+td.center {text-align: center; vertical-align:middle;}
+</style>
+{% endblock %}
+
+{% block body %}
+
+<div class="container">
+    <canvas id="myCanvas" width="{{ width }}" height="{{ height }}"></canvas>
+    <div class="page-header">
+           <h1>Data Review</h1>
+    </div>
+    <div class="row">
+           <div class="col-md-6">
+                <canvas id="scaledCanvas" width="512" height="512"></canvas>
+                <div id="progressbar"><div class="progress-label"></div></div>
+           </div><!--col-md-6-->
+           <div class="col-md-2">
+                <div class="panel panel-default">
+                      <div class="panel-heading">Select Regions of Interest</div>
+                      <table class="table">
+                      
+		      {% for roi in contourData %}
+                      <tr>
+                      <td>{{ roi.roiName }}</td>
+                      <td class="center"><input type="checkbox" id="{{ roi.roiName }}"></td>
+		      </tr>
+		      {% endfor %}
+
+                      </table>
+		</div><!--panel-->
+	   </div><!--col-md-2-->
+           <div class="col-md-2">
+                <div class="panel panel-default">
+                      <div class="panel-heading">Select Isodose Curves</div>
+                      <table class="table">
+                      <tr><td>40% </td><td class="center"><input type="checkbox" id="forty"></td></tr>
+		      <tr><td>50% </td><td class="center"><input type="checkbox" id="fifty"></td></tr>
+		      <tr><td>60% </td><td class="center"><input type="checkbox" id="sixty"></td></tr>
+		      <tr><td>70% </td><td class="center"><input type="checkbox" id="seventy"></td></tr>
+		      <tr><td>80% </td><td class="center"><input type="checkbox" id="eighty"></td></tr>
+		      <tr><td>90% </td><td class="center"><input type="checkbox" id="ninety"></td></tr>
+		      <tr><td>95% </td><td class="center"><input type="checkbox" id="ninetyFive"></td></tr>
+                      </table>
+		</div><!--panel-->
+	   </div><!--col-md-2-->
+    </div><!--row-->
+</div><!--container-->
+
+<script>
+var num = 0;
+
+//******** SET COLORS ************
+var roiColors = {'parotidRt':[51,153,255],'parotidLt':[51,153,255],'mandible':[255,51,153],'cochleaRt':[255,255,175],'cochleaLt':[255,255,175],'eyeRt':[204,153,255],'eyeLt':[204,153,255],'larynx':[0,204,0],'pharynx':[153,51,153],'tongue':[153,255,51],'ptv':[255,153,204]};
+var isodoseColors = {'forty':[153,255,255],'fifty':[0,255,204],'sixty':[204,255,0],'seventy':[255,255,0],'eighty':[255,204,0],'ninety':[255,102,0],'ninetyFive':[255,51,51]};
+
+var canvas = document.getElementById("myCanvas");
+var context = canvas.getContext("2d");
+var scaledCanvas = document.getElementById("scaledCanvas");
+var scaledContext = scaledCanvas.getContext("2d");
+
+//var imgd = context.createImageData({{ width }}, {{ height }});
+//var pix1 = imgd.data;
+
+window.allImages = new Array({{ numImages }} + 1);
+
+var c=0;
+window.consolidateImages = function(pix, index) {
+         c=c+1;
+         var currentImage = context.createImageData({{ width }},{{ height }});
+	 for (var i = 0; n = pix.length, i < n; i += 4) {
+                  currentImage.data[i]=pix[i];
+		  currentImage.data[i+1]=pix[i+1];
+		  currentImage.data[i+2]=pix[i+2];
+                  currentImage.data[i+3]=pix[i+3];
+	 }
+	 if(index) allImages[index] = currentImage;
+         else allImages.push(currentImage);
+
+         //If the first image has loaded, display it
+         if (index==0){
+              context.putImageData(currentImage, 0, 0);
+	      var currentImg = document.getElementById("myCanvas");
+	      scaledContext.drawImage(currentImg, 0, 0, 512, 512);						 
+         }
+
+         $(function() {
+                $( ".progress-label").text('Loading Images ..');
+                $( "#progressbar" ).progressbar({
+                       value: c
+                });
+         });
+ 
+        if (c=={{ numImages }}) document.getElementById('progressbar').style.display = 'none';
+}
+
+for (var i = 0; n = {{ numImages }}, i < n; i += 1) {
+         var jsss = document.createElement('script');
+         jsss.setAttribute("type", "text/javascript");
+	 jsss.setAttribute("src", "/static/jsPixelData/1/" + Math.abs(i) + ".js");
+	 document.getElementsByTagName("head")[0].appendChild(jsss);
+}
+
+//******************* DEFINE VARIABLES FOR ROIs ****************
+
+{% for roi in contourData %}
+var {{ roi.roiName }}_ct_sop_ids = {{ roi.contour_ct_sop_ids }};
+{{ roi.roiName }}_rows = new Array()
+{{ roi.roiName }}_columns = new Array()
+var {{ roi.roiName }}_r = {{ roi.rowCoords }};
+var {{ roi.roiName }}_c = {{ roi.columnCoords }};
+    for (var n=0;n<{{ roi.roiName }}_r.length;n++) {
+          {{ roi.roiName }}_rows[n] = {{ roi.roiName }}_r[n].substring(1,{{ roi.roiName }}_r[n].length-1).split(",");	
+          {{ roi.roiName }}_columns[n] = {{ roi.roiName }}_c[n].substring(1,{{ roi.roiName }}_c[n].length-1).split(",");
+	  for (var m=0 ; m<{{ roi.roiName }}_rows[n].length;m++) {
+	           {{ roi.roiName }}_rows[n][m] = parseInt({{ roi.roiName }}_rows[n][m]);
+                   {{ roi.roiName }}_columns[n][m] = parseInt({{ roi.roiName }}_columns[n][m]);
+          }
+    }
+{% endfor %}
+
+//****************** GET SOP IDs OF ALL CT IMAGES **************
+
+var all_ct_sop_ids = {{ ct_sop_ids }};
+
+//******************* DEFINE VARIABLES FOR ISODOSE **************
+
+{% for isodose in isodoseData %}
+var {{ isodose.isodoseValue }}_ct_sop_ids = {{ isodose.isodose_ct_sop_ids }};
+{{ isodose.isodoseValue }}_rows = new Array()
+{{ isodose.isodoseValue }}_columns = new Array()
+var {{ isodose.isodoseValue }}_r = {{ isodose.rowCoords }};
+var {{ isodose.isodoseValue }}_c = {{ isodose.columnCoords }};
+    for (var n=0;n<{{ isodose.isodoseValue }}_r.length;n++) {
+          {{ isodose.isodoseValue }}_rows[n] = {{ isodose.isodoseValue }}_r[n].substring(1,{{ isodose.isodoseValue }}_r[n].length-1).split(",");	
+          {{ isodose.isodoseValue }}_columns[n] = {{ isodose.isodoseValue }}_c[n].substring(1,{{ isodose.isodoseValue }}_c[n].length-1).split(",");
+	  for (var m=0 ; m<{{ isodose.isodoseValue }}_rows[n].length;m++) {
+	           {{ isodose.isodoseValue }}_rows[n][m] = parseInt({{ isodose.isodoseValue }}_rows[n][m]);
+                   {{ isodose.isodoseValue }}_columns[n][m] = parseInt({{ isodose.isodoseValue }}_columns[n][m]);
+          }
+    }
+{% endfor %}
+
+
+// ****************** MOUSEWHEEL ACTIONS ************************
+
+$(function () {
+function wheel(obj, fn, useCapture) {
+         var mousewheelevt = (/Firefox/i.test(navigator.userAgent)) ? "DOMMouseScroll" : "mousewheel"; //FF doesn't recognize mousewheel as of FF3.x  
+         if (obj.attachEvent) //if IE (and Opera depending on user setting)  
+                  obj.attachEvent("on" + mousewheelevt, handler, useCapture);
+         else if (obj.addEventListener) //WC3 browsers  
+                  obj.addEventListener(mousewheelevt, handler, useCapture);
+
+         function handler(event) {
+         var delta = 0;
+         var event = window.event || event;
+         var delta = event.detail ? -event.detail : event.wheelDelta / 3;
+         if (event.preventDefault)
+               event.preventDefault();
+         event.returnValue = false;
+         return fn.apply(obj, [event, delta]);
+         }
+}
+
+var slideshow = document.getElementById("scaledCanvas");
+var num = 0;
+
+function changeimg(delta) {
+     if (delta < 0) {
+	    if (num == {{ numImages }}) {
+		 num = 0;
+	    } else {
+		 num = num + 1;
+	    }
+     } 
+     else {
+	    if (num == 0) {
+		 num = {{ numImages }};
+	    } else {
+		 num = num - 1;
+	    }
+     }
+		 
+     if(allImages[num]){
+         var pixels=context.createImageData({{ width }}, {{ height }});
+         for (var t=0; t<{{ width }}*{{ height }}*4; t++){
+		pixels.data[t]=allImages[num].data[t];
+         }
+	 
+	 //*************** Add ROI Contours **********************
+	 {% for roi in contourData %}
+         if($('#{{ roi.roiName }}').is(":checked")) {
+           var contourIndex = {{ roi.roiName }}_ct_sop_ids.indexOf(all_ct_sop_ids[num]);
+           if (contourIndex!=-1) {
+	             for(var i=0;i<{{ roi.roiName }}_rows[contourIndex].length;i++){
+			 pixels.data[4*({{ width }}*({{ roi.roiName }}_rows[contourIndex][i]-1)+{{ roi.roiName }}_columns[contourIndex][i])]=roiColors['{{ roi.roiName }}'][0];
+			 pixels.data[4*({{ width }}*({{ roi.roiName }}_rows[contourIndex][i]-1)+{{ roi.roiName }}_columns[contourIndex][i])+1]=roiColors['{{ roi.roiName }}'][1];
+			 pixels.data[4*({{ width }}*({{ roi.roiName }}_rows[contourIndex][i]-1)+{{ roi.roiName }}_columns[contourIndex][i])+2]=roiColors['{{ roi.roiName }}'][2];
+			 pixels.data[4*({{ width }}*({{ roi.roiName }}_rows[contourIndex][i]-1)+{{ roi.roiName }}_columns[contourIndex][i])+3]=200;
+		      }
+             }
+          }
+          {% endfor %}
+
+         //************ Add Isodose Contours ********************
+         {% for isodose in isodoseData %}
+         if($('#{{ isodose.isodoseValue }}').is(":checked")) {
+           var isodoseIndex = {{ isodose.isodoseValue }}_ct_sop_ids.indexOf(all_ct_sop_ids[num]);
+           if (isodoseIndex!=-1) {
+	             for(var i=0;i<{{ isodose.isodoseValue }}_rows[isodoseIndex].length;i++){
+			 pixels.data[4*({{ width }}*({{ isodose.isodoseValue }}_rows[isodoseIndex][i]-1)+{{ isodose.isodoseValue }}_columns[isodoseIndex][i])]=isodoseColors['{{ isodose.isodoseValue }}'][0];
+			 pixels.data[4*({{ width }}*({{ isodose.isodoseValue }}_rows[isodoseIndex][i]-1)+{{ isodose.isodoseValue }}_columns[isodoseIndex][i])+1]=isodoseColors['{{ isodose.isodoseValue }}'][1];
+			 pixels.data[4*({{ width }}*({{ isodose.isodoseValue }}_rows[isodoseIndex][i]-1)+{{ isodose.isodoseValue }}_columns[isodoseIndex][i])+2]=isodoseColors['{{ isodose.isodoseValue }}'][2];
+			 pixels.data[4*({{ width }}*({{ isodose.isodoseValue }}_rows[isodoseIndex][i]-1)+{{ isodose.isodoseValue }}_columns[isodoseIndex][i])+3]=200;
+		      }
+             }
+          }
+ 
+          {% endfor %}
+
+	  context.putImageData(pixels, 0, 0);
+	  var currentImg = document.getElementById("myCanvas");
+          scaledContext.drawImage(currentImg, 0, 0, 512, 512);
+
+      }
+}    
+
+wheel(slideshow, function(e,delta){changeimg(delta)}, false);
+						 
+})
+
+</script>
+
+{% endblock %}

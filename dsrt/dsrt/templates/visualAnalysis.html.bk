@@ -1,0 +1,121 @@
+{% extends 'base.html' %}
+
+{% block title %}Search Summary{% endblock %}
+
+{% block head %} 
+
+<style type="text/css">
+#graph-container{width:100%; height:500px;}
+.center-div{width:200px; margin-left:auto; margin-right:auto}
+</style>
+
+<script>
+$(function () { 
+    $('#graph-container').highcharts({
+        
+        chart: {type: 'line'},
+        
+        title: {text: 'Anatomical Feature Analysis'},
+        
+        xAxis: {categories: [{{ pid }}]},
+       
+        yAxis: [{id:'pcMatch-axis', title: {text: 'Percentage Match'}},
+                {id:'volume', title: {text: 'Volume (mm3)'}},
+                {id:'doseMean', title: {text: 'Dose Mean (Gy)'}},
+                {id:'overlap', title: {text: 'Overlap with the PTV (%)'}},
+                {id: 'distance', title: {text: 'Mean Distance to the PTV (mm)'}}
+               ],
+
+        series:[{yAxis:'pcMatch-axis', type:'column', name: 'Percentage Match', pointWidth: 25, data: {{ pcMatch }} }],
+    });
+
+    var chart = $('#graph-container').highcharts();
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) {
+         
+             chart.addSeries({ name: '{{ roi.name }} Volume (mm3)', 
+                               type: 'line',
+                               yAxis: 'volume',
+                               data: {{ roi.volume }}
+                            });
+       }
+
+       else {
+             chart.series[1].remove();
+       }
+
+    });
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) {
+           
+             chart.addSeries({ name: '{{ roi.name }} Dose Mean (Gy)', 
+                               type: 'line',
+                               yAxis: 'doseMean',
+                               data: {{ roi.doseMean }},
+                               id: '{{ roi.name }}-dsoeMean'
+                            });
+       }
+
+       else {
+             chart.get('{{ roi.name }}-doseMean').remove();
+       }
+
+    });
+    
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) {
+             
+             chart.addSeries({ name: '{{ roi.name }} Overlap with the PTV (%)', 
+                               type: 'line',
+                               yAxis: 'overlap',
+                               data: {{ roi.overlap }}
+                            });
+       }
+
+       else {
+             chart.get('{{ roi.name }}-overlap').remove();
+       }
+
+    });
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) {
+             
+             chart.addSeries({ name: '{{ roi.name }} Mean Distance (mm)', 
+                               type: 'line',
+                               yAxis: 'distance',
+                               data: {{ roi.distance }}
+                            });
+       }
+
+       else {
+             chart.get('{{ roi.name }}-distance').remove();
+       }
+
+    });
+    {% endfor %}
+
+});
+
+</script>
+{% endblock %}
+
+{% block body %}
+<div id="graph-container"></div>
+<div class="center-div"><form>
+{% for roi in roiData %}
+{{ roi.name }} <input type="checkbox" name="selectedROIs" value="{{ roi.name }}" id="{{ roi.name }}">
+{% endfor %}
+</form></div>
+
+{% endblock %}

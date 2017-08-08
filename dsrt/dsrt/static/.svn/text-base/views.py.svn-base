@@ -1,0 +1,25 @@
+from django.http import HttpResponse
+import MySQLdb as db
+from django.shortcuts import render
+
+def hello(request):
+	return HttpResponse("Hello World!!!!")
+
+def worklist(request):
+	if request.user.is_authenticated():
+		con = db.connect('localhost','root','$i_rt_test','rt_hn')
+    		cur = con.cursor()
+		cur.execute('SELECT DISTINCT id FROM patient')
+		results = cur.fetchall()
+		return render(request,'patientList.html',{'patients':results})	
+	else:
+		return HttpResponse("Please Log In") 
+	
+def display_meta(request):
+	dictMeta = request.META.items()
+	dictMeta.sort()
+	#v = dictMeta.values()
+	#k = dictMeta.keys()
+	
+	return render(request,'display_meta.html',{'values':dictMeta})
+

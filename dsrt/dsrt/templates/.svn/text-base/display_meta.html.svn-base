@@ -1,0 +1,12 @@
+{% load staticfiles %}
+<html><head><title>Request Meta</title></head>
+<body>
+<script src="{{ STATIC_URL }}/test.js"></script>
+<h3>Request Metadata</h3>
+<table>
+{% for v in values %}
+<tr><td>{{v.0}}</td><td>{{v.1}}</td></tr>
+{% endfor %}
+</table>
+</body>
+</html>

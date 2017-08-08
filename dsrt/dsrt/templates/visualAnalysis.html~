@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+
+{% block title %}Search Summary{% endblock %}
+
+{% block head %} 
+
+<style type="text/css">
+.returnLink {margin: 0px auto;}
+#graph-container{width:100%; height:500px;}
+#column{background-color:#E8E8E8; padding: 10px; border: 2px solid #A0A0A0; text-align:center;}
+.cancel-padding{padding: 0 15px;}
+#container{width:800px; margin-left:auto; margin-right:auto}
+#row{padding-top: 10px;}
+</style>
+
+<script>
+
+$(function () { 
+    $('#graph-container').highcharts({
+        
+        chart: {type: 'line'},
+        
+        title: {text: '<button><a href="http://dsrt.usc.edu/matchAlgo/">[ Back to Search Summary ]</a></button> Anatomical Feature Analysis'},
+        
+        xAxis: {categories: [{{ pid }}]},
+       
+        yAxis: [{id:'pcMatch-axis', title: {text: 'Percentage Match'}},
+                {id:'toxicity-axis', title: {text: 'Toxicity'}},
+                {id:'volume', title: {text: 'Volume (mm3)'}},
+                {id:'doseMean', title: {text: 'Dose Mean (Gy)'}},
+                {id:'overlap', title: {text: 'Overlap with the PTV (%)'}},
+                {id: 'distance', title: {text: 'Mean Distance to the PTV (mm)'}}
+               ],
+
+        series:[{yAxis: 'pcMatch-axis', type:'column', name: 'Percentage Match', pointWidth: 25, data: {{ pcMatch }} },
+                {yAxis: 'toxicity-axis', type:'area', name: 'Toxicity', pointWidth: 25, data: {{ toxicity }} },
+               
+               {% for roi in roiData %}
+               {yAxis: 'volume', type:'line', name: '{{ roi.name }} Volume', data:{{ roi.volume }}, visible:false },
+               {yAxis: 'doseMean', type:'line', name: '{{ roi.name }} Mean Dose', data:{{ roi.doseMean }}, visible:false },
+               {yAxis: 'overlap', type:'line', name: '{{ roi.name }}-PTV Overlap', data:{{ roi.overlap }}, visible:true },
+               {yAxis: 'distance', type:'line', name: '{{ roi.name }}-PTV Mean Distance', data:{{ roi.distance }}, visible:false },
+               {% endfor %}                
+               ],
+    });
+
+    var chart = $('#graph-container').highcharts();
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) { if ($('#volume').is(":checked")) {chart.series[{{ roi.volumeSeriesIndex  }}].show()}; }
+       else { chart.series[{{ roi.volumeSeriesIndex }}].hide(); }
+    });
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) { if ($('#doseMean').is(":checked")) {chart.series[{{ roi.doseMeanSeriesIndex }}].show()}; }
+       else { chart.series[{{ roi.doseMeanSeriesIndex }}].hide(); }  
+    });
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) { if ($('#overlap').is(":checked")) {chart.series[{{ roi.overlapSeriesIndex }}].show()}; }
+       else { chart.series[{{ roi.overlapSeriesIndex }}].hide(); }
+    });
+    {% endfor %}
+
+    {% for roi in roiData %}
+    $('#{{ roi.name }}').click(function() {
+       if (this.checked) { if ($('#distance').is(":checked")) {chart.series[{{ roi.distanceSeriesIndex }}].show()}; }
+       else { chart.series[{{ roi.distanceSeriesIndex }}].hide(); }
+    });
+    {% endfor %}
+
+    $('#volume').click(function() {
+       if (!(this.checked)) {
+           {% for roi in roiData %}
+              chart.series[{{ roi.volumeSeriesIndex }}].hide()
+           {% endfor %}
+       }
+       else {   
+           {% for roi in roiData %}
+              if ($('#{{ roi.name }}').is(":checked")) {chart.series[{{ roi.volumeSeriesIndex }}].show()};
+           {% endfor %}
+       }
+    });
+
+    $('#doseMean').click(function() {
+       if (!(this.checked)) {
+           {% for roi in roiData %}
+              chart.series[{{ roi.doseMeanSeriesIndex }}].hide()
+           {% endfor %}
+       }
+       else {   
+           {% for roi in roiData %}
+              if ($('#{{ roi.name }}').is(":checked")) {chart.series[{{ roi.doseMeanSeriesIndex }}].show()};
+           {% endfor %}
+       }
+    });
+
+   $('#overlap').click(function() {
+       if (!(this.checked)) {
+           {% for roi in roiData %}
+              chart.series[{{ roi.overlapSeriesIndex }}].hide()
+           {% endfor %}
+       }
+       else {   
+           {% for roi in roiData %}
+              if ($('#{{ roi.name }}').is(":checked")) {chart.series[{{ roi.overlapSeriesIndex }}].show()};
+           {% endfor %}
+       }
+    });
+
+    $('#distance').click(function() {
+       if (!(this.checked)) {
+           {% for roi in roiData %}
+              chart.series[{{ roi.distanceSeriesIndex }}].hide()
+           {% endfor %}
+       }
+       else {   
+           {% for roi in roiData %}
+              if ($('#{{ roi.name }}').is(":checked")) {chart.series[{{ roi.distanceSeriesIndex }}].show()};
+           {% endfor %}
+       }
+    });
+
+});
+</script>
+{% endblock %}
+
+{% block body %}
+
+       <div id="graph-container"></div>
+       <form>
+	 <div class="container"><div class="cancel-padding"><div class="row" id="row">
+	          <div class="col-md-6" id="column">
+		    <b>Select ROIs for comparison:</b><br/>
+		    {% for roi in roiData %}
+		    {{ roi.name }} <input type="checkbox" name="selectedROIs" value="{{ roi.name }}" id="{{ roi.name }}" checked>&nbsp;&nbsp;
+		    {% endfor %}
+		  </div>
+
+		  <div class="col-md-6" id="column">
+		    <b>Select Features for comparison:</b><br/>
+		    Volume <input type="checkbox" name="selectedFeatures" value="volume" id="volume">&nbsp;&nbsp;
+		    Mean Dose <input type="checkbox" name="selectedFeatures" value="doseMean" id="doseMean">&nbsp;&nbsp;
+		    Overlap with the PTV <input type="checkbox" name="selectedFeatures" value="overlap" id="overlap" checked>&nbsp;&nbsp;
+		    Distance to the PTV <input type="checkbox" name="selectedFeatures" value="distance" id="distance">
+		  </div>
+	  </div></div>
+<div class="returnLink"><a href="http://dsrt.usc.edu/matchAlgo/">[ Back to Search Summary ]</a></div>
+</div>
+       </form>
+
+{% endblock %}

@@ -1,0 +1,187 @@
+{% extends 'base.html' %}
+
+{% block title %}Search Summary{% endblock %}
+
+{% block head %} 
+<style type="text/css">
+.container{width:1300px;}
+.table{table-layout:fixed;}
+.center{text-align: center;}
+.mm {margin: 5px;}
+th {text-align:center;}
+td {text-align: center; vertical-align:middle;}
+.normalFont {font-weight:normal;}
+#emdScatter{width:500px; height:400px;}
+#simScatter{width:500px; height:400px;}
+#pcMatchScatter{width:500px; height:400px;}
+#ptvVolumeScatter{width:500px; height:400px;}
+#ptvDoseScatter{width:500px; height:400px;}
+#toxicityScatter{width:500px; height:400px;}
+h1 {text-align: center;}
+</style>
+<script>
+
+$(function () { 
+   $('#emdScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'EMD'},
+        xAxis: {tickInterval: 1},
+        yAxis: {id:'emd', title: {text: 'EMD for OVHs'} },
+        series:[{yAxis: 'emd', name: 'EMD', data: [{% for a,b,c,d,f,g,h,emd,j in results %}[{{ forloop.counter }},{{ emd }}]{% if not forloop.last %},{% endif %}{% endfor %}]}]
+   });
+});
+
+$(function () { 
+   $('#simScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'Orientational Similarity'},
+        xAxis: {tickInterval: 1},
+        yAxis: {id:'sim', title: {text: 'Orientation Similarity'} },
+        series:[{yAxis: 'sim', name: 'SIM', data: [{% for a,b,c,d,f,g,h,i,sim in results %}[{{ forloop.counter }},{{ sim }}]{% if not forloop.last %},{% endif %}{% endfor %}]}]
+   });
+});
+
+$(function () { 
+   $('#pcMatchScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'Overall Percentage Match'},
+        xAxis: {tickInterval: 1},
+        yAxis: {min:0, id:'pcMatch', title: {text: 'Percentage Match'} },
+        series:[{yAxis: 'pcMatch', name: 'EMD', data: [{% for a,b,pcMatch,d,f,g,h,i,j in results %}[{{ forloop.counter }},{{ pcMatch }}]{% if not forloop.last %},{% endif %}{% endfor %}]}]
+   });
+});
+
+$(function () { 
+   $('#toxicityScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'Toxicity Scatter'},
+        xAxis: {tickInterval: 1},
+        yAxis: {min:0, id:'toxicity', title: {text: 'Toxicity'} },
+        series:[{yAxis: 'toxicity', name: 'toxicity', data: [{% for a,b,c,d,f,g,toxicity,i,j in results %}[{{ forloop.counter }},{{ toxicity }}]{% if not forloop.last %},{% endif %}{% endfor %}]}]
+   });
+});
+
+$(function () { 
+   $('#ptvVolumeScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'PTV Volume'},
+        xAxis: {tickInterval: 1},
+        yAxis: {min:0, id:'ptvVolume', title: {text: 'PTV Volume'} },
+        series:[{yAxis: 'ptvVolume', name: 'PTV Volume', data: [{% for a,b,c,d,ptvVolume,g,h,i,j in results %}[{{ forloop.counter }},{{ ptvVolume }}]{% if not forloop.last %},{% endif %}{% endfor %}]},
+                {yAxis: 'ptvVolume', name:'PTV Volume Current', data: [[0,{{ queryPtvVolume }}]]}
+               ]
+   });
+});
+
+$(function () { 
+   $('#ptvDoseScatter').highcharts({
+        chart: {type: 'scatter'},
+        legend: {enabled: false},
+        title: {text: 'PTV Dose'},
+        xAxis: {tickInterval: 1},
+        yAxis: {min:0, id:'ptvDose', title: {text: 'PTV Dose'} },
+        series:[{yAxis: 'ptvDose', name: 'PTV Dose', data: [{% for a,b,c,d,f,ptvDose,h,i,j in results %}[{{ forloop.counter }},{{ ptvDose }}]{% if not forloop.last %},{% endif %}{% endfor %}]},
+                {yAxis: 'ptvDose', name: 'PTV Dose Current', data: [[0,{{ queryPtvDose }}]]}
+               ]
+   });
+});
+
+</script>
+
+{% endblock %}
+
+{% block body %}
+
+<div class="container"><form id="dsAction" action="" method="post" enctype="multipart/form-data">
+<!--<div class="page-header"><h1>Search Summary</h1></div>-->
+<div class="center">
+<button type="submit" class="btn btn-primary mm" name="visual">Visual Comparison</button>
+<button type="submit" class="btn btn-primary mm" name="review">Review Imaging Data</button>
+<button type="submit" class="btn btn-primary mm" name="save">Save Flagged Studies</button>
+<button type="submit" class="btn btn-primary mm" name="download">Download Flagged Studies</button>
+
+</div>
+
+<div>
+
+<table class="table table-striped table-hover table-condensed">
+
+<tr><th>Select</th><th>Rank</th><th>Percentage Match</th><th>EMD for OVHs</th><th>Orientation Similarity</th><th>PTV Volume (mm<sup>3</sup>)</th><th>Mean PTV Dose (Gy)</th><th>Toxicity</th></tr>
+
+<tr>
+<td><!--<div class="normalFont"><button type="button" class="btn btn-link btn-xs" id="selectAll">[&nbsp;&nbsp;&nbsp;Check All&nbsp;&nbsp;&nbsp;]</button><button type="button" class="btn btn-link btn-xs" id="deselectAll">[ Uncheck All ]</button></div>-->
+<div class="btn-group"><button type="button" class="btn btn-link btn-xs" id="selectAll">[ Check ]</button><button type="button" class="btn btn-link btn-xs" id="deselectAll">[ Uncheck ]</button></div>
+</td>
+<td></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#pcMatchModal">[ Show Scatter ]</button></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#emdModal">[ Show Scatter ]</button></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#simModal">[ Show Scatter ]</button></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#ptvVolumeModal">[ Show Scatter ]</button></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#ptvDoseModal">[ Show Scatter ]</button></td>
+<td><button type="button" class="btn btn-link btn-xs" data-toggle="modal" data-target="#toxicityModal">[ Show Scatter ]</button></td>
+</tr>
+{% for pID, sid, pcMatch, rank, ptvVolume, ptvDose, toxicity, emd, sim in results %}
+{% if forloop.first %}
+<tr><td>-</td><td><b>Query Case</b></td><td>-</td><td>-</td><td>-</td><td><b>{{ currentPtvVolume }}</b></td><td><b>{{ currentPtvDose }}</b></td><td>-</td></tr>
+{% endif %}
+<tr>
+<td><input type="checkbox" name="selectedStudies" value="{{ sid }}"></td><td>{{ rank }}</td><td>{{ pcMatch }}</td><td>{{ emd }}</td><td>{{ sim }}</td><td>{{ ptvVolume }}</td><td>{{ ptvDose }}</td><td>{{ toxicity }}</td>
+</tr>
+{% endfor %}
+</table>
+<!--<div>--><!--panel div-->
+</div>
+
+<div class="center">
+<button type="submit" class="btn btn-primary mm" name="visual">Visual Comparison</button>
+<button type="submit" class="btn btn-primary mm" name="review">Review Imaging Data</button>
+<button type="submit" class="btn btn-primary mm" name="save">Save Flagged Studies</button>
+<button type="submit" class="btn btn-primary mm" name="download">Download Flagged Studies</button>
+</div></form>
+
+{% for i in '123456'|make_list %}
+<div class="modal fade" id="{% cycle 'pcMatchModal' 'emdModal' 'simModal' 'ptvVolumeModal' 'ptvDoseModal' 'toxicityModal' %}" tabindex="-1" role="dialog" aria-labelledby="myModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+        <h4 class="modal-title" id="myModalLabel">
+	{% cycle 'Percentage Match with Database Cases' 'Earth Movers Distance between the Overlap Volume Histogram of the Query Case and the Database Cases' 'Orinetation Similarity between the Query Case and the Database Cases' 'Spread of the PTV Volume' 'Spread of the Mean PTV Dose' 'Toxicitiy Scatter' %}
+        </h4>
+      </div>
+      <div class="modal-body">
+      <div id="{% cycle 'pcMatchScatter' 'emdScatter' 'simScatter' 'ptvVolumeScatter' 'ptvDoseScatter' 'toxicityScatter' %}"></div>
+      </div>
+      <div class="modal-footer">
+      </div>
+    </div><!-- /.modal-content -->
+  </div><!-- /.modal-dialog -->
+</div><!-- /.modal -->
+{% endfor %}
+</div>
+
+<script>
+
+$('#selectAll').click(function(event) {   
+    
+    $(':checkbox').each(function() {
+             this.checked = true;
+    });
+            
+});
+
+$('#deselectAll').click(function(event) {   
+    
+    $(':checkbox').each(function() {
+             this.checked = false;
+    });
+            
+});
+</script>
+
+{% endblock %}

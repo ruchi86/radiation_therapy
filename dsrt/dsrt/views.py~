@@ -1,0 +1,556 @@
+from django.http import HttpResponse, HttpResponseRedirect
+import MySQLdb as db
+from django.shortcuts import render, redirect
+from forms import dcmUploadForm
+import dicom
+from settings import STATIC_ROOT
+import zipfile
+import shutil
+import os
+import os.path
+import numpy as np
+import math
+from django.utils import simplejson
+from django.utils.safestring import mark_safe
+
+def hello(request):
+	return HttpResponse(request.GET.has_key('f'))
+
+def worklist(request):
+	if request.user.is_authenticated():
+		con = db.connect('localhost','root','$i_rt_test','rt_hn')
+    		cur = con.cursor()
+		cur.execute('SELECT DISTINCT id FROM patient')
+		results = cur.fetchall()
+		return render(request,'patientList.html',{'patients':results})	
+	else:
+		return HttpResponse("Please Log In") 
+	
+
+def uploadForm(request):
+	if request.method == 'POST': #check whether a form has been submitted
+            html =''
+            uploadedFileObject = request.FILES['dcmZipFile'] #send file object to new function for processing
+	    raw_file_path = os.path.join(STATIC_ROOT, 'raw', uploadedFileObject.name) #where the uploaded file is first stored
+	    with open(raw_file_path,'wb+') as destination: #write the uploaded file to the raw directory
+		    for chunk in uploadedFileObject.chunks():
+			    destination.write(chunk)
+	    (name, ext) = os.path.splitext(raw_file_path) #name is filename, ext is extension
+	    if ext=='.zip':
+		    #Does not handle no DICOM files being included in the zip file
+		    patientID=processUploadedFile(raw_file_path)
+		    #processUploadedFile(raw_file_path)
+		    #html = html + "Patient ID:" + patientID
+                    folder_path = os.path.join(STATIC_ROOT,'temp')
+		    for file_object in os.listdir(folder_path):
+			    file_object_path = os.path.join(folder_path, file_object)
+			    if os.path.isfile(file_object_path):
+				    os.unlink(file_object_path)
+			    else:
+				    shutil.rmtree(file_object_path)
+	            folder_path = os.path.join(STATIC_ROOT,'raw')
+		    for file_object in os.listdir(folder_path):
+			    file_object_path = os.path.join(folder_path, file_object)
+			    if os.path.isfile(file_object_path):
+				    os.unlink(file_object_path)
+			    else:
+				    shutil.rmtree(file_object_path)
+			    request.session['currentPatientID']=patientID
+		    return redirect('/dataReview/?pid='+patientID)
+	    else:
+		    return HttpResponse('Please Upload a zip file')
+	else:
+            return render(request,'dcmUploadForm.html')
+
+def processUploadedFile(raw_file_path):
+	html=''
+	zipObject=zipfile.ZipFile(raw_file_path.encode('utf8')) #create zipfile object
+	for name in zipObject.namelist():#name is the name of the file with its path
+		(dirname, filename) = os.path.split(name)#Splits pathname into directory and filename
+		if filename: #i.e. if it is not a directory
+			if not os.path.exists(os.path.join(STATIC_ROOT, 'temp', dirname)):#if the directory does not exist
+				os.makedirs(os.path.join(STATIC_ROOT, 'temp', dirname))##os.makedirs makes intermediate directories required 4 ultimate target
+				destination = os.path.join(STATIC_ROOT,'temp',dirname,filename)#where the file must be stored
+				fileObject = open(destination,"w")#Open file object
+				fileObject.write(zipObject.read(name))#Read the zipped file and then write it
+				fileObject.close()#Close the object
+	    
+		rootDir = os.path.join(STATIC_ROOT,'temp')# set the directory you want to start from
+		flag=0
+		for dirName,subdirList,fileList in os.walk( rootDir ):
+			for currentFile in fileList:
+				file_path = os.path.join(dirName, currentFile)
+				try:
+					#if file is dicom, it gets parsed, else this does not execute and exception gets called
+					ds=dicom.read_file(file_path)
+					html = 'file successfully read'
+					patientID = ds.PatientID 
+					flag=1
+				        break
+				except:
+					continue
+			if flag==1:
+				break
+		
+	return patientID
+	#return HttpResponse(html)
+
+def matchAlgo(request):
+	if request.method != 'POST': #check whether a form has been submitted
+		#Get a list of all unique patient ids
+		con = db.connect('localhost','root','$rt_ds_37','rt_hn')
+		cur = con.cursor()
+		if request.GET.has_key('f'):
+			fk_patient_id=request.session['current_fk_patient_id']
+			roiList = request.session['roiList']
+			xx, ptv = get_roiList(cur,fk_patient_id)
+		else:
+			fk_patient_id=request.GET['pid']
+			request.session['current_fk_patient_id']=request.GET['pid']
+			roiList, ptv = get_roiList(cur,fk_patient_id)
+		 
+		#Get PTV Dose and PTV Volume for the current patient, or query patient
+		cur.execute('SELECT Volume, doseMean FROM structure_set_roi_sequence_copy WHERE fk_patient_id="'+str(fk_patient_id)+'" AND stdROIName LIKE "ptv%"')
+		queryPtvParams = cur.fetchall()
+		request.session['currentPtvVolume']=queryPtvParams[0][0]
+		request.session['currentPtvDose']=queryPtvParams[0][1]
+
+		all_ids=[] 
+		common_ids=all_ids
+		for roi in roiList:
+			cur.execute("SELECT DISTINCT dbPatientID FROM " + roi + " WHERE queryPatientID = '" +str( fk_patient_id) + "' ORDER BY dbPatientID ASC")
+			current_roi_ids = [int(x[0]) for x in cur.fetchall()] 
+                        all_ids.extend(current_roi_ids)
+                        common_ids=list(set(common_ids)&set(current_roi_ids))
+		unique_ids=common_ids
+		unique_ids.sort()
+		#Initialize arrays to store emd, sim, roiDose in lists, such that each element of the list is a list itself. Each row of the outer list is a patient. Each element in the inner list crresponds to an ROI.
+		#Initialize meanEMD, meanSIM, maxROIDose, studyID, ptvVolume, ptvDose as lists such that each list element corresponds to a patient
+		emd = [[] for i in range(0, len(unique_ids))]
+		meanEMD = [0 for i in range(0, len(unique_ids))]
+		sim = [[] for i in range(0, len(unique_ids))]
+		meanSIM = [0 for i in range(0, len(unique_ids))]
+		studyID = [0 for i in range(0, len(unique_ids))]
+		ptvVolume = [0 for i in range(0, len(unique_ids))]
+		ptvDose = [0 for i in range(0, len(unique_ids))]
+		toxicity = [0 for i in range(0, len(unique_ids))]
+		#Fill all elements of emd, sim and roiDose
+		for roi in roiList: # Repeat for each ROI table
+			cur.execute("SELECT dbPatientID, emd, sim FROM " + roi + " WHERE queryPatientID = '" +str( fk_patient_id) + "' ORDER BY dbPatientID ASC")
+			temp = cur.fetchall()
+			ids_roi = [int(x[0]) for x in temp]
+			emd_roi = [x[1] for x in temp]
+			sim_roi = [x[2] for x in temp]
+			for id in unique_ids:
+				if id in ids_roi:
+					emd[unique_ids.index(id)].append(emd_roi[ids_roi.index(id)])
+					sim[unique_ids.index(id)].append(sim_roi[ids_roi.index(id)])
+		#For every patient, select ptvVol, ptvDose and calculate the mean emd and mean sim across all rois. Also the maximum mean dose to all ROIs of that patient
+		for id in unique_ids:
+			cur.execute("SELECT id FROM study WHERE fk_patient_id='"+str(id)+"'")
+			studyID[unique_ids.index(id)]=cur.fetchall()[0][0]
+			cur.execute("SELECT Volume, doseMean FROM structure_set_roi_sequence_copy WHERE fk_study_id='"+str(studyID[unique_ids.index(id)])+"' AND stdROIName LIKE 'ptv%'")
+			ptvVolDose = cur.fetchall()
+			ptvVolume[unique_ids.index(id)]=ptvVolDose[0][0]
+			ptvDose[unique_ids.index(id)]=ptvVolDose[0][1]
+			meanEMD[unique_ids.index(id)]=np.average(emd[unique_ids.index(id)])
+			meanSIM[unique_ids.index(id)]=np.average(sim[unique_ids.index(id)])
+			cur.execute("SELECT toxicity FROM patient WHERE id='"+str(studyID[unique_ids.index(id)])+"'")
+			toxicityResult = cur.fetchall()
+			toxicity[unique_ids.index(id)]=toxicityResult[0][0]
+		# Re-arrange meanEMD and meanSIM arrays by normalizing, etc.
+		meanEMD_a = 100-((np.array(meanEMD)/np.amax(meanEMD))*100)
+		meanSIM_a = np.array(meanSIM)
+		pcMatch = meanEMD_a*meanSIM_a
+		result = np.zeros(len(unique_ids), dtype=[('pID', int),('studyID', int),('percentage_match',float),('rank',int),('ptvVolume',float),('ptvDose',float),('toxicity',int),('emd',float),('sim',float)])
+		result['pID'] = unique_ids
+		result['studyID'] = studyID
+		result['emd'] = meanEMD
+		result['sim'] = meanSIM
+		result['percentage_match'] = pcMatch
+		result['ptvVolume'] = ptvVolume
+		result['ptvDose'] = ptvDose
+		result['toxicity'] = toxicity
+		result=np.flipud(np.sort(result, order=['percentage_match']))
+		result['rank']=np.arange(1,len(unique_ids)+1)
+		#Change after linking pages
+		request.session['numResults']=15
+		request.session['user'], request.session['rois'], request.session['ptv']='jDoe', roiList, ptv
+		result=result[0:request.session['numResults']]
+		file_full=file(STATIC_ROOT+"/tmp/"+request.session['user']+"_full","wb")
+		np.save(file_full,result)
+		result['percentage_match']=[round(x,2) for x in result['percentage_match']]
+		result['emd']=[round(x,2) for x in result['emd']]
+		result['sim']=[round(x,2) for x in result['sim']]
+		result['ptvVolume']=[round(x,2) for x in result['ptvVolume']]
+		result['ptvDose']=[round(x,2) for x in result['ptvDose']]
+		result=list(result)
+		xStringList = range(1,request.session['numResults']+1)
+		xString = [str(x) for x in xStringList]
+		xString = mark_safe(str(xString))
+		return render(request,'searchSummary.html',{'results':result,'xString':xString,'currentPtvVolume':request.session['currentPtvVolume'],'currentPtvDose':request.session['currentPtvDose']})	           
+		#return HttpResponse(str(result))
+	else:
+		if request.POST.has_key('visual'):
+			selectedStudies = request.POST.getlist('selectedStudies')
+			selectedStudies_string = str(selectedStudies).rstrip(']').lstrip('[').replace('u','')
+			request.session['selectedStudies']=selectedStudies_string
+			f=file(STATIC_ROOT+"/tmp/"+request.session['user']+"_full","rb")
+			result=np.load(f)
+			pid=list(result[['pID'][0]])
+			studyID_o=list(result[['studyID'][0]])
+			studyID=[str(x).encode("utf-8") for x in studyID_o]
+			selectedStudies = [x.encode("utf-8") for x in selectedStudies]
+			rank=list(result[['rank'][0]])
+			percentage_match=list(result[['percentage_match'][0]])
+			ptvDose=list(result[['ptvDose'][0]])
+			toxicity=list(result[['toxicity'][0]])
+			ptvVolume=list(result[['ptvVolume'][0]])
+			request.session['selectedStudiesList']=studyID
+			temp_percentage_match,temp_rank,temp_ptvDose,temp_ptvVolume, temp_toxicity=[],[],[],[],[]
+			for selectedStudy in list(selectedStudies):
+				temp_percentage_match.append(percentage_match[studyID.index(selectedStudy)])
+				temp_rank.append(rank[studyID.index(selectedStudy)])
+				temp_ptvDose.append(ptvDose[studyID.index(selectedStudy)])
+				temp_ptvVolume.append(ptvVolume[studyID.index(selectedStudy)])
+				temp_toxicity.append(toxicity[studyID.index(selectedStudy)])
+			request.session['pcMatch']=temp_percentage_match
+			request.session['rank']=temp_rank
+			request.session['ptvDose']=temp_ptvDose
+			request.session['ptvVolume']=temp_ptvVolume
+			request.session['toxicity']=temp_toxicity
+			return redirect('/visualComp/')
+		elif request.POST.has_key('review'):
+			selectedStudies = request.POST.getlist('selectedStudies')
+			if (len(selectedStudies)==1):
+				selectedStudy = selectedStudies[0]
+			else:
+				selectedStudy = 0
+			#return HttpResponse(len(selectedStudies))
+                        return redirect('/getPixelData?selectedStudy='+str(selectedStudy))
+		elif request.POST.has_key('save'):
+			return redirect('/saveFlagged/')
+		elif request.POST.has_key('download'):
+			return redirect('/downloadFlagged/')
+
+def visualComp(request):
+	con = db.connect('localhost','root','$rt_ds_37','rt_hn')
+	cur = con.cursor()
+	fk_patient_id=request.session['current_fk_patient_id']
+        ptv=request.session['ptv']
+        roiList=request.session['rois']	
+	roiFeatures = dict()
+        
+	for roi in roiList:
+		cur.execute('SELECT fk_patient_id, doseMean, doseMax, Volume, PercentageOverlap_ROI_Fraction_ptv1, DistanceMean_ptv1 FROM structure_set_roi_sequence_copy WHERE stdROIName="'+roi+'" AND fk_patient_id IN ('+request.session['selectedStudies']+') ORDER BY fk_patient_id ASC')
+		roiResult=cur.fetchall()
+		rank=request.session['rank']
+                pid=[x[0] for x in roiResult]
+		doseMean=[round(x[1],2) for x in roiResult]
+		doseMax=[round(x[2],2) for x in roiResult]
+		volume=[round(x[3],2) for x in roiResult]
+		overlap=[round(x[4],2) for x in roiResult]
+		distance=[round(x[5],2) for x in roiResult]
+
+		cur.execute('SELECT doseMean, doseMax, Volume, PercentageOverlap_ROI_Fraction_ptv1, DistanceMean_ptv1 FROM structure_set_roi_sequence_copy WHERE stdROIName="'+roi+'" AND fk_patient_id="'+str(fk_patient_id)+'"')
+		queryParams = cur.fetchall()
+		queryDoseMean = queryParams[0][0]
+		queryDoseMax = queryParams[0][1]
+		queryVolume = queryParams[0][2]
+		queryOverlap = queryParams[0][3]
+		queryDistance = queryParams[0][4]
+				   
+		dataset=np.zeros(len(rank), dtype=[('rank', int),('pid',int),('doseMean',float),('doseMax',float),('volume',float),('overlap',float),('distance',float)])
+		dataset['rank']=rank
+		dataset['pid']=pid
+		dataset['doseMean']=doseMean
+		dataset['doseMax']=doseMax
+                dataset['volume']=volume
+	        dataset['overlap']=overlap
+		dataset['distance']=distance	  
+			  
+		sortedDataset = np.sort(dataset, order=['rank'])
+		pid=list(sortedDataset[['pid'][0]])
+		doseMean=[round(x,2) for x in sortedDataset[['doseMean'][0]]]
+		doseMax=[round(x,2) for x in sortedDataset[['doseMax'][0]]]
+		volume=[round(x,2) for x in sortedDataset[['volume'][0]]]
+		overlap=[round(x,2) for x in sortedDataset[['overlap'][0]]]
+		distance=[round(x,2) for x in sortedDataset[['distance'][0]]]
+                doseMean=np.insert(doseMean,0,queryDoseMean)
+		doseMax=np.insert(doseMax,0,queryDoseMax)
+		volume=np.insert(volume,0,queryVolume)
+		overlap=np.insert(overlap,0,queryOverlap)
+		distance=np.insert(distance,0,queryDistance)
+		pid_string = '\''
+		for id in pid:
+			pid_string=pid_string+str(id)+'\',\''
+		pid_string=pid_string.rstrip('\'')
+		pid_string=pid_string.rstrip(',')
+		pid_string=mark_safe(pid_string)
+
+		roiFeatures[roi]={'pid':pid_string,'doseMean':doseMean,'doseMax':doseMax,'volume':volume,'overlap':overlap,'distance':distance}
+        
+	data=dict()
+	
+	pcMatch = request.session['pcMatch']
+	ptvDose = request.session['ptvDose']
+	ptvVolume = request.session['ptvVolume']
+	toxicity = request.session['toxicity']
+	
+        #***************** Re-format features to send to template **********************3
+	data['pcMatch']=list(np.insert(pcMatch,0,0))
+	data['ptvDose']=ptvDose
+	data['ptvVolume']=ptvVolume
+	data['toxicity']=list(np.insert(toxicity,0,0))
+        data['numROIs']=len(roiList)
+	roiData=[]
+
+	for idx, roi in enumerate(roiList):
+		temp=dict()
+		temp['name']=roi
+		temp['volume']=list(roiFeatures[roi]['volume'])
+		temp['doseMean']=list(roiFeatures[roi]['doseMean'])
+		temp['doseMax']=list(roiFeatures[roi]['doseMax'])
+		temp['overlap']=list(roiFeatures[roi]['overlap'])
+		temp['distance']=list(roiFeatures[roi]['distance'])
+		temp['volumeSeriesIndex']=(idx*4)+1
+		temp['doseMeanSeriesIndex']=(idx*4)+2
+		temp['overlapSeriesIndex']=(idx*4)+3
+		temp['distanceSeriesIndex']=(idx*4)+4
+		roiData.append(temp)
+	data['roiData']=roiData
+	data['range_list']=[1,2,3,4]
+	#pid_string has patient IDs, roiFeatures['roi_name'] are dictionaries with keys pid (a string), doseMean, doseMax, volume, overlap, distance 
+#	return render(request,'visualAnalysis.html',{'pid':roiFeatures['parotidRt']['pid'],'dose':roiFeatures['parotidRt']['doseMean'],'overlap':roiFeatures['parotidRt']['overlap'],'distance':roiFeatures['parotidRt']['distance']})
+        return render(request, 'visualAnalysis.html', data)
+#	return HttpResponse(np.insert(doseMean,0,queryDoseMean))
+
+
+def saveFlagged(request):
+	return HttpResponse('Save Selected Studies')
+
+def downloadFlagged(request):
+	return HttpResponse('Download Selected Studies')
+
+def get_roiList(cur,fk_patient_id):
+	cur.execute("SELECT stdROIName FROM structure_set_roi_sequence_copy WHERE fk_patient_id='"+str(fk_patient_id)+"'")
+	roiList = cur.fetchall()
+	trimmedROIList = []
+	allowedROIs = ['cochleaRt','cochleaLt','parotidRt','parotidLt','eyeRt','eyeLt','mandible','larynx','pharynx','tongue']
+        #allowedROIs = ['parotidRt','parotidLt','mandible','larynx','pharynx','tongue']
+	for roi in roiList:
+		if roi[0].startswith('ptv'):
+			ptv=roi
+		if roi[0] in allowedROIs:
+			trimmedROIList.append(roi[0])
+	return trimmedROIList, ptv
+
+
+def getPixelData(request):
+	con = db.connect('localhost','root','$rt_ds_37','rt_hn')
+	cur = con.cursor()
+        data=dict()
+	fk_patient_id=request.GET['selectedStudy'];
+	data['PatientID']=1
+	data['fk_patient_id']=fk_patient_id
+	cur.execute("SELECT StudyID, StudyDescription FROM study WHERE fk_patient_id='"+str(fk_patient_id)+"'")
+	studyResult = cur.fetchall()
+	data['StudyID']=studyResult[0][0]
+	data['StudyDescription']=studyResult[0][1]
+	cur.execute("SELECT SeriesNumber, SeriesDescription FROM series WHERE fk_patient_id='"+str(fk_patient_id)+"'")
+	seriesResult = cur.fetchall()
+	data['SeriesNumber']=seriesResult[0][0]
+	data['SeriesDescription']=seriesResult[0][1]
+
+	cur.execute('SELECT width, height, fk_sop_id FROM ct_image WHERE fk_patient_id="'+str(fk_patient_id)+'" ORDER BY zIndex ASC')
+	result=cur.fetchall()
+	data['numImages']=len(result)-1
+	data['width']=result[0][0]
+	data['height']=result[1][0]		
+	data['ct_sop_ids']=[int(x[2]) for x in result]
+	
+	#############  NEW CODE FOR ROIs & DVH ###########
+	
+	roiList, ptv = get_roiList(cur, fk_patient_id)
+	contourData = []
+	for roi in roiList:
+		temp = dict()
+		cur.execute('SELECT pixelCoordsRow, pixelCoordsColumn, ct_fk_sop_id FROM contour_sequence WHERE fk_patient_id="'+str(fk_patient_id)+'" AND stdROIname="'+roi+'"')
+		resultContours = cur.fetchall()
+		temp['rowCoords'] = mark_safe([mark_safe(x[0]) for x in resultContours])
+		temp['columnCoords'] = mark_safe([mark_safe(x[1]) for x in resultContours])
+		temp['contour_ct_sop_ids'] = [int(x[2]) for x in resultContours]
+		temp['roiName'] = roi
+		if (roi=='parotidRt' or roi=='parotidLt'):
+			temp['colorRound']='(0,204,0)'
+			temp['colorSquare']='[0,204,0]'
+		if (roi=='eyeRt' or roi=='eyeLt'):
+			temp['colorRound']='(153,51,153)'
+			temp['colorSquare']='[153,51,153]'
+		if (roi=='cochleaRt' or roi=='cochleaLt'):
+                        temp['colorRound']='(153,255,51)'
+			temp['colorSquare']='[153,255,51]'
+		if (roi=='mandible'):
+			temp['colorRound']='(204,153,255)'
+			temp['colorSquare']='[204,153,255]'
+		if (roi=='tongue'):
+			temp['colorRound']='(255,255,175)'
+			temp['colorSquare']='[255,255,175]'
+		if (roi=='pharynx'):
+			temp['colorRound']='(51,153,255)'
+			temp['colorSquare']='[51,153,255]'
+		if (roi=='larynx'):
+			temp['colorRound']='(255,153,204)'
+			temp['colorSquare']='[255,153,204]'
+		cur.execute('SELECT dvhCumulative FROM structure_set_roi_sequence_copy WHERE stdROIName="'+roi+'" AND fk_patient_id="'+str(fk_patient_id)+'"')
+		temp['dvh']=cur.fetchall()[0][0]
+		contourData.append(temp)
+	
+	# For the PTV
+	temp = dict()
+	cur.execute('SELECT pixelCoordsRow, pixelCoordsColumn, ct_fk_sop_id FROM contour_sequence WHERE fk_patient_id="'+str(fk_patient_id)+'" AND stdROIname="'+str(ptv[0])+'"')
+	resultContours = cur.fetchall()
+	temp['rowCoords'] = mark_safe([mark_safe(x[0]) for x in resultContours])
+	temp['columnCoords'] = mark_safe([mark_safe(x[1]) for x in resultContours])
+	temp['contour_ct_sop_ids'] = [int(x[2]) for x in resultContours]
+	temp['roiName'] = 'ptv'
+	temp['colorRound']='(102,51,255)'
+	temp['colorSquare']='[102,51,255]'
+	cur.execute('SELECT dvhCumulative FROM structure_set_roi_sequence_copy WHERE stdROIName="'+str(ptv[0])+'" AND fk_patient_id="'+str(fk_patient_id)+'"')
+	temp['dvh']=cur.fetchall()[0][0]
+	contourData.append(temp)
+	
+	data['contourData']=contourData		  
+
+	############## CODE FOR ISODOSE ##############
+
+	isodoseData = []
+	for isodoseValue in [40,50,60,70,80,90,95]:
+		temp=dict()
+		cur.execute('SELECT rowValues, columnValues, ct_fk_sop_id FROM isodose WHERE fk_patient_id="'+str(fk_patient_id)+'" AND isodoseNumber = "'+str(isodoseValue)+'"')
+		resultIsodoses = cur.fetchall()
+		if isodoseValue==40:
+			temp['isodoseValue']='forty'
+			temp['colorRound']='(153,255,255)'
+			temp['colorSquare']='[153,255,255]'
+		if isodoseValue==50:
+			temp['isodoseValue']='fifty'
+			temp['colorRound']='(0,255,204)'
+			temp['colorSquare']='[0,255,204]'
+		if isodoseValue==60:
+			temp['isodoseValue']='sixty'
+			temp['colorRound']='(204,255,0)'
+			temp['colorSquare']='[204,255,0]'
+		if isodoseValue==70:
+			temp['isodoseValue']='seventy'
+			temp['colorRound']='(255,255,0)'
+			temp['colorSquare']='[255,255,0]'
+		if isodoseValue==80:
+			temp['isodoseValue']='eighty'
+			temp['colorRound']='(255,204,0)'
+			temp['colorSquare']='[255,204,0]'
+		if isodoseValue==90:
+			temp['isodoseValue']='ninety'
+			temp['colorRound']='(255,102,0)'
+			temp['colorSquare']='[255,102,0]'
+		if isodoseValue==95:
+			temp['isodoseValue']='ninetyFive'
+			temp['colorRound']='(255,51,51)'
+			temp['colorSquare']='[255,51,51]'
+
+		temp['isodose_ct_sop_ids']=[int(x[2]) for x in resultIsodoses]
+		temp['rowCoords']=mark_safe([mark_safe(x[0]) for x in resultIsodoses])
+		temp['columnCoords']=mark_safe([mark_safe(x[1]) for x in resultIsodoses])
+		isodoseData.append(temp)
+
+	data['isodoseData']=isodoseData				    
+        #return HttpResponse(dvhResult[0][0])
+        return render(request,'iDisp5.html',data)
+
+
+def dataReview(request):
+	con = db.connect('localhost','root','$rt_ds_37','rt_hn')
+       	cur = con.cursor()
+       	patientID = request.GET['pid']
+	data=dict()
+       	cur.execute("SELECT id, PatientID FROM patient WHERE PatientID='"+str(patientID)+"'")
+	patientResult = cur.fetchall()
+       	fk_patient_id=patientResult[0][0]
+	data['PatientID']=patientResult[0][1]
+	cur.execute("SELECT StudyID, StudyDescription FROM study WHERE fk_patient_id='"+str(fk_patient_id)+"'")
+	studyResult = cur.fetchall()
+	data['StudyID']=studyResult[0][0]
+	data['StudyDescription']=studyResult[0][1]
+	cur.execute("SELECT SeriesNumber, SeriesDescription FROM series WHERE fk_patient_id='"+str(fk_patient_id)+"'")
+	seriesResult = cur.fetchall()
+	data['SeriesNumber']=seriesResult[0][0]
+	data['SeriesDescription']=seriesResult[0][1]
+        
+       	request.session['current_fk_patient_id']=fk_patient_id
+	if request.method != 'POST':
+		cur.execute('SELECT width, height, fk_sop_id FROM ct_image WHERE fk_patient_id="'+str(fk_patient_id)+'" ORDER BY zIndex ASC')
+		result=cur.fetchall()
+		data['numImages']=len(result)-1
+		data['width']=result[0][0]
+		data['height']=result[1][0]		
+		data['ct_sop_ids']=[int(x[2]) for x in result]
+	
+	#############  NEW CODE FOR ROIs ###########
+	
+		roiList, ptv = get_roiList(cur, fk_patient_id)
+		contourData = []
+		for roi in roiList:
+			temp = dict()
+			cur.execute('SELECT pixelCoordsRow, pixelCoordsColumn, ct_fk_sop_id FROM contour_sequence WHERE fk_patient_id="'+str(fk_patient_id)+'" AND stdROIname="'+roi+'"')
+			resultContours = cur.fetchall()
+			temp['rowCoords'] = mark_safe([mark_safe(x[0]) for x in resultContours])
+			temp['columnCoords'] = mark_safe([mark_safe(x[1]) for x in resultContours])
+			temp['contour_ct_sop_ids'] = [int(x[2]) for x in resultContours]
+			temp['roiName'] = roi
+			if (roi=='parotidRt' or roi=='parotidLt'):
+				temp['colorRound']='(0,204,0)'
+				temp['colorSquare']='[0,204,0]'
+			if (roi=='eyeRt' or roi=='eyeLt'):
+				temp['colorRound']='(153,51,153)'
+				temp['colorSquare']='[153,51,153]'
+			if (roi=='cochleaRt' or roi=='cochleaLt'):
+				temp['colorRound']='(153,255,51)'
+				temp['colorSquare']='[153,255,51]'
+			if (roi=='mandible'):
+				temp['colorRound']='(204,153,255)'
+				temp['colorSquare']='[204,153,255]'
+			if (roi=='tongue'):
+				temp['colorRound']='(255,255,175)'
+				temp['colorSquare']='[255,255,175]'
+			if (roi=='pharynx'):
+				temp['colorRound']='(51,153,255)'
+				temp['colorSquare']='[51,153,255]'
+			if (roi=='larynx'):
+				temp['colorRound']='(255,153,204)'
+				temp['colorSquare']='[255,153,204]'
+			contourData.append(temp)
+	
+	# For the PTV
+		temp = dict()
+		cur.execute('SELECT pixelCoordsRow, pixelCoordsColumn, ct_fk_sop_id FROM contour_sequence WHERE fk_patient_id="'+str(fk_patient_id)+'" AND stdROIname="'+str(ptv[0])+'"')
+		resultContours = cur.fetchall()
+		temp['rowCoords'] = mark_safe([mark_safe(x[0]) for x in resultContours])
+		temp['columnCoords'] = mark_safe([mark_safe(x[1]) for x in resultContours])
+		temp['contour_ct_sop_ids'] = [int(x[2]) for x in resultContours]
+		temp['roiName'] = 'ptv'
+		temp['colorRound']='(255,0,0)'
+		temp['colorSquare']='[255,0,0]'
+		contourData.append(temp)
+	
+		data['contourData']=contourData		  
+		    
+        #return HttpResponse(str(isodoseData[6]['rowCoords']))
+		return render(request,'dataReview.html',data)
+	else:
+		roiList = request.POST.getlist('rois')
+		if 'ptv' in roiList:
+			index = roiList.index('ptv')
+			roiList.remove('ptv')
+		request.session['roiList']=roiList
+		return redirect('/matchAlgo/?f=1&pid='+str(fk_patient_id))
+		#return HttpResponse(str(roiList))

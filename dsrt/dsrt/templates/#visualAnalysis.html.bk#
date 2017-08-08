@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+
+{% block title %}Search Summary{% endblock %}
+
+{% block head %} 
+
+<style type="text/css">
+#graph-container{width:100%; height:500px;}
+.center-div{width:200px; margin-left:auto; margin-right:auto}
+</style>
+
+<script>
+$(function () { 
+    $('#graph-container').highcharts({
+        
+        chart: {type: 'line'},
+        
+        title: {text: 'Anatomical Feature Analysis'},
+        
+        xAxis: {categories: [{{ pid }}]},
+       
+        yAxis: [{id:'dose-axis', title: {text: 'Dose (Gy)'} }],
+        
+        series:[{yAxis:'dose-axis', name: 'Mean Dose',  data: {{ dose }} }],
+    });
+
+    var chart = $('#graph-container').highcharts();
+
+    $('#overlap').click(function() { 
+          chart.addAxis({id: 'overlap-axis', title: {text: 'Overlap'} });
+          chart.addSeries({ name: 'Overlap', type: 'line', yAxis: 'overlap-axis', data: {{overlap}} });
+          $(this).attr('disabled', true);
+    });
+
+});
+
+
+
+</script>
+
+{% endblock %}
+
+{% block body %}
+<div id="graph-container"></div>
+<div class="center-div">
+{{% for roi in roi
+<button id="overlap">Percentage Overlap</button>
+</div>
+
+{% endblock %}

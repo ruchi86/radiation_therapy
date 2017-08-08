@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+
+{% block title %}Upload Files{% endblock %}
+
+{% block head %}
+<link href="{{ STATIC_URL }}/login.css" rel="stylesheet">
+<style type="text/css">
+#uploadDataset
+{
+margin: 10px auto;
+max-width:480px;
+}
+.panel-heading h1 {text-align:center; font-size:48px;}
+.panel-body {text-align:justify; text-justify:inter-word;font-size:16px;}
+</style>
+{% endblock %}
+
+{% block body %}
+
+<div class="container"  margin:"100px auto" max-width:"480px">
+<div class="panel panel-default">
+<div class="panel-heading">
+<h1> Welcome to 'Decision Support for Radiation Therapy Treatment Planning' (DSRTTP) </h1>
+</div><!--panel-heading-->
+<div class="panel-body">
+<p><b>Instructions: Please upload a complete input dataset consisting of a planning/ simulation CT series and a Structure Set Object in DICOM format. Compress all files and folders into a zip file prior to submitting.</b></p>
+Your Query case will be matched against the database cases to yield a set of results that are anatomically most similar to the query case. "Anatomical" similarity is determined by quantifying the spatial relationship between the PTV and surrounding Regions of Interest, since this relationship is most relevant for treatment planning in radiation therapy.
+   <form class="form-signin form-inline" id="uploadDataset" action="" method="post" enctype="multipart/form-data">
+    <div class="form-group"> 
+      <input type="file" class="form-control input-lg" name="dcmZipFile">
+    </div>
+    <div class="form-group">
+      <button type="submit" class="btn btn-primary btn-lg">Submit</button>
+    </div>  
+  </form>
+</div><!--panel-footer-->
+</div><!--panel-->
+</div><!--container-->
+
+{% endblock %}
